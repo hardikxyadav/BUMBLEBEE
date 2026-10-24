@@ -1,0 +1,254 @@
+import { useState, useEffect, lazy, Suspense } from 'react';
+import { ScanLine } from 'lucide-react';
+import {
+  VerificationCase,
+  OfficerProfile
+} from './types/screening';
+import {
+  DEMO_CASE_1_GENUINE,
+  DEMO_CASE_2_TAMPERED,
+  DEMO_CASE_3_FACE_MISMATCH
+} from './services/aiEngine';
+import {
+  getStoredOfficerSession,
+  clearOfficerSession
+} from './services/authService';
+import { Navbar } from './components/Navbar';
+import { HeroSection } from './components/HeroSection';
+
+// Lazy load secondary modules for blazingly fast initial page load on Vercel
+const OfficerLogin = lazy(() =>
+  import('./components/OfficerLogin').then((m) => ({ default: m.OfficerLogin }))
+);
+const MainDashboard = lazy(() =>
+  import('./components/MainDashboard').then((m) => ({ default: m.MainDashboard }))
+);
+const WorkflowPipeline = lazy(() =>
+  import('./components/WorkflowPipeline').then((m) => ({ default: m.WorkflowPipeline }))
+);
+const AuditTrailView = lazy(() =>
+  import('./components/AuditTrailView').then((m) => ({ default: m.AuditTrailView }))
+);
+const AnalyticsView = lazy(() =>
+  import('./components/AnalyticsView').then((m) => ({ default: m.AnalyticsView }))
+);
+const ArchitectureView = lazy(() =>
+  import('./components/ArchitectureView').then((m) => ({ default: m.ArchitectureView }))
+);
+const RAGKnowledgeHub = lazy(() =>
+  import('./components/RAGKnowledgeHub').then((m) => ({ default: m.RAGKnowledgeHub }))
+);
+const AdminPanel = lazy(() =>
+  import('./components/AdminPanel').then((m) => ({ default: m.AdminPanel }))
+);
+
+export default function App() {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  
+  // Officer session persisted in localStorage
+  const [officer, setOfficer] = useState<OfficerProfile | null>(() => getStoredOfficerSession());
+
+  // Default to 'admin' if admin session, 'dashboard' if officer, otherwise 'login'
+  const [activeView, setActiveView] = useState<
+    'hero' | 'login' | 'dashboard' | 'workflow' | 'audit' | 'analytics' | 'architecture' | 'rag' | 'admin'
+  >(() => {
+    const session = getStoredOfficerSession();
+    if (!session) return 'login';
+    return session.isAdmin ? 'admin' : 'dashboard';
+  });
+
+  // Current active case being screened
+  const [currentCase, setCurrentCase] = useState<VerificationCase>(DEMO_CASE_1_GENUINE);
+
+  // Digital audit trail ledger containing verified cases
+  const [auditCases, setAuditCases] = useState<VerificationCase[]>([
+    DEMO_CASE_1_GENUINE,
+    DEMO_CASE_2_TAMPERED,
+    DEMO_CASE_3_FACE_MISMATCH,
+  ]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+  };
+
+  const handleSelectDemoCase = (caseType: 'genuine' | 'tampered' | 'mismatch') => {
+    if (!officer) {
+      setActiveView('login');
+      return;
+    }
+    if (caseType === 'genuine') {
+      setCurrentCase({ ...DEMO_CASE_1_GENUINE, timestamp: new Date().toISOString() });
+    } else if (caseType === 'tampered') {
+      setCurrentCase({ ...DEMO_CASE_2_TAMPERED, timestamp: new Date().toISOString() });
+    } else {
+      setCurrentCase({ ...DEMO_CASE_3_FACE_MISMATCH, timestamp: new Date().toISOString() });
+    }
+    setActiveView('workflow');
+  };
+
+  const handleSaveToAudit = (savedCase: VerificationCase) => {
+    setAuditCases((prev) => {
+      const existsIndex = prev.findIndex((c) => c.caseId === savedCase.caseId);
+      if (existsIndex >= 0) {
+        const next = [...prev];
+        next[existsIndex] = savedCase;
+        return next;
+      }
+      return [savedCase, ...prev];
+    });
+    setActiveView('audit');
+  };
+
+  const isDark = theme === 'dark';
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark', 'dark-theme');
+    } else {
+      document.documentElement.classList.remove('dark', 'dark-theme');
+    }
+  }, [isDark]);
+
+  // Strict access guard: unauthenticated users cannot access internal views
+  const handleNavigate = (view: 'hero' | 'dashboard' | 'workflow' | 'audit' | 'analytics' | 'architecture' | 'rag' | 'login' | 'admin') => {
+    if (!officer && view !== 'login') {
+      setActiveView('login');
+      return;
+    }
+    setActiveView(view);
+  };
+
+  const handleLogout = () => {
+    clearOfficerSession();
+    setOfficer(null);
+    setActiveView('login');
+  };
+
+  return (
+    <div
+      className={`min-h-screen transition-colors duration-500 relative font-body-custom ${
+        isDark ? 'dark dark-theme bg-[#0b0f19] text-slate-100' : 'bg-[#f4f4f0] text-slate-900'
+      } selection:bg-black selection:text-white`}
+    >
+
+      {/* Top Navbar */}
+      <Navbar
+        currentView={officer ? activeView : 'login'}
+        onNavigate={handleNavigate}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        officer={officer}
+        onLogout={handleLogout}
+      />
+
+      {/* Main View Router */}
+      <main className="relative z-10">
+        {/* If not authenticated, always display the Officer Login portal */}
+        {!officer ? (
+          <Suspense
+            fallback={
+              <div className="min-h-[70vh] flex flex-col items-center justify-center gap-3 text-xs font-mono">
+                <ScanLine className="w-6 h-6 text-cyan-500 animate-spin" />
+                <span className="opacity-70">Securing Terminal Gateway...</span>
+              </div>
+            }
+          >
+            <OfficerLogin
+              onLoginSuccess={(authOfficer) => {
+                setOfficer(authOfficer);
+                setActiveView(authOfficer.isAdmin ? 'admin' : 'dashboard');
+              }}
+              isDark={isDark}
+            />
+          </Suspense>
+        ) : (
+          <>
+            {/* VIEW 1: HERO LANDING */}
+            {activeView === 'hero' && (
+              <HeroSection
+                onStartVerification={() => setActiveView('dashboard')}
+                onExploreTech={() => setActiveView('architecture')}
+                onSelectDemoCase={handleSelectDemoCase}
+                isDark={isDark}
+              />
+            )}
+
+            {/* Dynamic Views wrapped in Suspense */}
+            <Suspense
+              fallback={
+                <div className="min-h-[70vh] flex flex-col items-center justify-center gap-3 text-xs font-mono">
+                  <ScanLine className="w-6 h-6 text-cyan-500 animate-spin" />
+                  <span className="opacity-70">Loading Aegis Security Module...</span>
+                </div>
+              }
+            >
+              {/* VIEW 2: OFFICER LOGIN */}
+              {activeView === 'login' && (
+                <OfficerLogin
+                  onLoginSuccess={(authOfficer) => {
+                    setOfficer(authOfficer);
+                    setActiveView('dashboard');
+                  }}
+                  isDark={isDark}
+                />
+              )}
+
+              {/* VIEW 3: MAIN OFFICER DASHBOARD */}
+              {activeView === 'dashboard' && (
+                <MainDashboard
+                  officer={officer}
+                  onStartNewVerification={() => setActiveView('workflow')}
+                  onSelectDemoCase={handleSelectDemoCase}
+                  onNavigate={handleNavigate}
+                  isDark={isDark}
+                />
+              )}
+
+              {/* VIEW 4: VERIFICATION WORKFLOW PIPELINE (MODULES 1 TO 7) */}
+              {activeView === 'workflow' && (
+                <WorkflowPipeline
+                  currentCase={currentCase}
+                  officer={officer}
+                  onUpdateCase={(updated) => setCurrentCase(updated)}
+                  onSaveToAudit={handleSaveToAudit}
+                  onOpenReport={() => setActiveView('audit')}
+                  isDark={isDark}
+                />
+              )}
+
+              {/* VIEW 5: DIGITAL AUDIT TRAIL */}
+              {activeView === 'audit' && (
+                <AuditTrailView
+                  cases={auditCases}
+                  onOpenReport={(repCase) => {
+                    setCurrentCase(repCase);
+                    setActiveView('workflow');
+                  }}
+                  isDark={isDark}
+                />
+              )}
+
+              {/* VIEW 6: ANALYTICS MODULE */}
+              {activeView === 'analytics' && <AnalyticsView isDark={isDark} />}
+
+              {/* VIEW 7: SYSTEM ARCHITECTURE & AI TECHNOLOGY */}
+              {activeView === 'architecture' && <ArchitectureView isDark={isDark} />}
+
+              {/* VIEW 8: RAG REGULATORY INTELLIGENCE HUB */}
+              {activeView === 'rag' && <RAGKnowledgeHub isDark={isDark} />}
+
+              {/* VIEW 9: APEX ADMIN COMMAND & TELEMETRY */}
+              {activeView === 'admin' && (
+                <AdminPanel
+                  officer={officer}
+                  onNavigate={handleNavigate}
+                  isDark={isDark}
+                />
+              )}
+            </Suspense>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
